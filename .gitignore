@@ -4,7 +4,13 @@ web/data/sessions.json
 web/data/online.json
 web/data/mutes.json
 web/data/messages.json
+web/data/state.json
+web/data/timesheets/
 web/data/api.log
+
+# Local environment overrides (view timezone, etc.). env.sample.php is committed
+# as the template; copy it to env.php and edit. Real env.php is per-host.
+web/env.php
 
 # Local logs
 *.log

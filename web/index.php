@@ -4,9 +4,23 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PeppaNotifier</title>
-  <link rel="stylesheet" href="assets/style.css?v=4">
+  <link rel="stylesheet" href="assets/style.css?v=7">
 </head>
 <body>
+
+<header class="topbar hidden" id="topbar">
+  <span class="brand">PeppaNotifier</span>
+  <nav class="topnav">
+    <button type="button" id="nav-home" class="nav-btn">Home</button>
+    <button type="button" id="nav-work-toggle" class="nav-btn">Start</button>
+    <button type="button" id="nav-timesheet" class="nav-btn">Timesheet</button>
+    <button type="button" id="nav-state" class="nav-btn hidden">OFF</button>
+  </nav>
+  <a href="#" id="me-logout" class="me-logout" title="Click to logout">
+    <span class="power-icon" aria-hidden="true">⏻</span>
+    <span class="me" id="me-label"></span>
+  </a>
+</header>
 
 <div id="view-login" class="view">
   <form id="login-form" class="login-box">
@@ -19,11 +33,6 @@
 </div>
 
 <div id="view-main" class="view hidden">
-  <header class="topbar">
-    <span class="brand">PeppaNotifier</span>
-    <span class="me" id="me-label"></span>
-  </header>
-
   <div id="enable-sound-banner" class="banner hidden">
     <span>Click to enable notifications and sound for this device.</span>
     <button id="btn-enable-sound">Enable notifications 🔔</button>
@@ -34,9 +43,40 @@
   <footer class="bottombar">
     <button id="btn-send">Send</button>
     <button id="btn-mute"><span class="lbl">Mute</span><span id="mute-remaining" class="mute-remaining"></span></button>
-    <button id="btn-exit">Exit</button>
     <button id="btn-logout">Logout</button>
   </footer>
+</div>
+
+<div id="view-timesheet" class="view hidden">
+  <div class="ts-controls">
+    <label>Year <select id="ts-year"></select></label>
+    <label>Month <select id="ts-month"></select></label>
+    <span class="ts-status" id="ts-status"></span>
+  </div>
+  <div class="ts-tables">
+    <table class="ts-table" id="ts-table">
+      <thead>
+        <tr>
+          <th>Day</th>
+          <th>Weekday</th>
+          <th>User</th>
+          <th>Start</th>
+          <th>Stop</th>
+          <th>Gaps</th>
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <h3 class="ts-summary-title">Monthly totals</h3>
+    <table class="ts-summary" id="ts-summary">
+      <thead>
+        <tr><th>User</th><th>Total time</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
 </div>
 
 <div id="view-exited" class="view hidden">
@@ -94,8 +134,10 @@
   </div>
 </div>
 
+<div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
+
 <audio id="notify-audio" src="assets/notify.mp3" preload="auto"></audio>
 
-<script src="assets/app.js?v=4"></script>
+<script src="assets/app.js?v=7"></script>
 </body>
 </html>

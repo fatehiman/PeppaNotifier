@@ -312,3 +312,132 @@ web/
    - Tap → MainActivity. Open-ack on visible rows.
 6. **Release APK**
    - `./gradlew assembleRelease` with a self-signed keystore checked in.
+
+---
+
+## 9. Timesheet (web only, v2)
+
+A lightweight work-start / work-stop tracker bolted onto the existing chat.
+Server is the source of truth; UI lives in the same SPA shell (no new routes
+at the Apache level, just a hash route).
+
+### Top-bar menu
+
+Top bar (visible on chat and timesheet views) carries three buttons after
+the brand:
+
+```
+[PeppaNotifier]  [Home]  [Start | Stop]  [Timesheet]                  [me]
+```
+
+- **Home** → `location.hash = ''`, switches to the chat view.
+- **Start / Stop** → toggle button. Disabled while `POST ts_toggle` is in
+  flight. The label reflects server state, reconciled on every poll.
+- **Timesheet** → `location.hash = '#timesheet'`, switches to the timesheet
+  view (same top bar stays).
+
+There is **no** hamburger; all three items are always visible.
+
+### Storage
+
+```
+web/data/timesheets/{YYYYMM}-{user}.json   (one file per user per month)
+```
+
+Each file is an append-only JSON array:
+
+```json
+[
+  {"ts": 1715500000, "kind": "start"},
+  {"ts": 1715501800, "kind": "stop"}
+]
+```
+
+- Only the raw unix timestamp and the kind are stored — no timezone-baked
+  strings. The view timezone (`TZ_VIEW`, see `web/env.php`) is applied at
+  read time, so changing it later reformats every entry consistently.
+- All writes go through `flock(LOCK_EX)`, same pattern as `messages.json`.
+- The `data/` `.htaccess` already denies HTTP access to the whole tree, so
+  the subfolder is private without extra config.
+
+### Timezone — env.php
+
+```
+web/env.php          (gitignored, per-host)
+web/env.sample.php   (committed template, used as fallback if env.php absent)
+```
+
+Both define `const TZ_VIEW = 'Asia/Tehran';`. `lib.php` loads env on every
+request and calls `date_default_timezone_set(TZ_VIEW)`. From that point on,
+every server-side `date()` call is in the view timezone, and the API's
+`ts_month` response also returns the `tz_view` it used.
+
+Edge case the user explicitly accepts: storage filenames embed
+`YYYYMM-{user}.json` based on TZ_VIEW at write time. Changing TZ_VIEW
+later won't move entries that were written near a TZ boundary into the
+month they would now belong to. Acceptable because real working hours
+(10:30–19:30 IRST) are far from any UTC/IRST flip point.
+
+### State derivation
+
+A user is **started** iff the last entry in their *current-month* file has
+`date == today` AND `kind == "start"`. This handles midnight rollover
+automatically: a `start` from yesterday with no following `stop` lands on
+"stopped" today, and the next toggle on the new day appends a fresh `start`.
+This matches the rule "no work across midnight — user must stop before
+00:00 and start again after".
+
+### API additions
+
+| Action | Method | Body / query | Returns |
+|---|---|---|---|
+| `ts_state` | GET | — | `{state: "started"\|"stopped", today_date}` for the caller. |
+| `ts_toggle` | POST | — (server flips the current state) | `{state, today_date}`. Server appends a timesheet entry only — **no chat broadcast**. The web client shows a local `Started!` / `Stopped!` toast on success. |
+| `ts_months` | GET | — | `[{year, month}, ...]` sorted desc. Always includes the current month even if empty on disk. |
+| `ts_month` | GET | `year`, `month` | `{year, month, entries: {username: [...]}}`. Returns every user's entries — everyone can see everyone's timesheet. |
+
+`poll` is also extended to return `ts_state` and `today_date` so the toggle
+button reconciles on the existing 15 s tick without a separate timer.
+
+### Daily-row computation (client)
+
+For one user's same-day entries sorted by ts:
+
+- `start` = time of the *first* `start`.
+- `stop` = time of the *last* `stop`, or `—` if the day ends in an open session.
+- `gaps` = sum of `(next_start − previous_stop)` across all reopen gaps.
+- `total` = sum of each `(stop − start)` session, or `—` if the day ends in
+  an open session. Equivalent to `(last_stop − first_start) − gaps`.
+
+If a day has no entries from anyone, a single dimmed placeholder row is still
+rendered (per the "at least one row per day" rule).
+
+### Timesheet view
+
+```
+[ Year ▾ ]  [ Month ▾ ]                                          (status)
+
+┌─ ts-table ────────────────────────────────────────────────────────────┐
+│ Day │ Weekday │ User    │ Start │ Stop  │ Gaps  │ Total │
+├─────┼─────────┼─────────┼───────┼───────┼───────┼───────┤
+│  1  │  Mon    │ amir    │ 09:02 │ 17:31 │ 01:05 │ 07:24 │
+│  1  │  Mon    │ fatemeh │ 08:50 │ 17:00 │ 00:30 │ 07:40 │
+│  2  │  Tue    │   —     │   —   │   —   │   —   │   —   │
+│ ... │                                                       │
+└────────────────────────────────────────────────────────────┘
+
+Monthly totals
+┌──────────┬───────────────┐
+│ User     │ Total time    │
+├──────────┼───────────────┤
+│ amir     │ 162:48        │
+│ fatemeh  │ 170:05        │
+└──────────┴───────────────┘
+```
+
+- Weekday is computed in JS from `new Date(year, month-1, day).getDay()`.
+- Sat (6) and Sun (0) rows get a weekend background (amber).
+- Year dropdown lists only years with data on disk; month dropdown lists
+  only months with data for the selected year. The current month is always
+  available even if empty.
+

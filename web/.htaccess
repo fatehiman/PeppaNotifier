@@ -2,6 +2,9 @@
 RewriteEngine On
 RewriteCond %{HTTP:Authorization} ^(.+)$
 RewriteRule ^ - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+
+# Clean URL for the on/off status probe.
+RewriteRule ^state/?$ state.php [L]
 </IfModule>
 
 DirectoryIndex index.php

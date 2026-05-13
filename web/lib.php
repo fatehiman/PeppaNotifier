@@ -1,7 +1,17 @@
 <?php
 declare(strict_types=1);
 
+// Per-host config: TZ_VIEW (and anything else added later).
+// env.php is gitignored; env.sample.php is the committed fallback.
+$__env = __DIR__ . '/env.php';
+if (!file_exists($__env)) $__env = __DIR__ . '/env.sample.php';
+require $__env;
+unset($__env);
+
+date_default_timezone_set(TZ_VIEW);
+
 const DATA_DIR = __DIR__ . '/data';
+const TS_DIR = __DIR__ . '/data/timesheets';
 const RETENTION_SECONDS = 7 * 86400;
 const NOTIFY_WINDOW = 120;
 const MISSED_WINDOW = 7200;
@@ -237,4 +247,152 @@ function prune_messages(array &$messages, int $now): void {
         $messages,
         fn($m) => (int)($m['sent_at'] ?? 0) >= $cutoff
     ));
+}
+
+/* ---------- On/Off state flag ---------- */
+
+function state_get(): int {
+    $s = db_read('state.json');
+    return (int)($s['on'] ?? 0) === 1 ? 1 : 0;
+}
+
+function state_set(int $on): int {
+    $v = $on === 1 ? 1 : 0;
+    db_modify('state.json', function (array &$s) use ($v) {
+        $s['on'] = $v;
+    });
+    return $v;
+}
+
+/* ---------- Timesheets ---------- */
+
+function ts_safe_user(string $user): string {
+    return preg_replace('/[^a-zA-Z0-9_-]/', '_', $user);
+}
+
+function ts_filename(int $year, int $month, string $user): string {
+    return sprintf('%04d%02d-%s.json', $year, $month, ts_safe_user($user));
+}
+
+function ts_path(int $year, int $month, string $user): string {
+    return TS_DIR . '/' . ts_filename($year, $month, $user);
+}
+
+function ts_ensure_dir(): void {
+    if (!is_dir(TS_DIR)) {
+        @mkdir(TS_DIR, 0755, true);
+    }
+}
+
+function ts_read_user_month(int $year, int $month, string $user): array {
+    $path = ts_path($year, $month, $user);
+    if (!file_exists($path)) return [];
+    $fp = fopen($path, 'rb');
+    if ($fp === false) return [];
+    flock($fp, LOCK_SH);
+    $contents = stream_get_contents($fp);
+    flock($fp, LOCK_UN);
+    fclose($fp);
+    if ($contents === '' || $contents === false) return [];
+    $data = json_decode($contents, true);
+    return is_array($data) ? $data : [];
+}
+
+function ts_append_user_month(int $year, int $month, string $user, array $entry): void {
+    ts_ensure_dir();
+    $path = ts_path($year, $month, $user);
+    $fp = fopen($path, 'c+b');
+    if ($fp === false) {
+        throw new RuntimeException("cannot open $path");
+    }
+    flock($fp, LOCK_EX);
+    $contents = stream_get_contents($fp);
+    $data = ($contents === '' || $contents === false) ? [] : json_decode($contents, true);
+    if (!is_array($data)) $data = [];
+    $data[] = $entry;
+    rewind($fp);
+    ftruncate($fp, 0);
+    fwrite($fp, json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    fflush($fp);
+    flock($fp, LOCK_UN);
+    fclose($fp);
+}
+
+/** Returns [['year'=>Y, 'month'=>M], ...] sorted desc, distinct across users. */
+function ts_list_months(): array {
+    if (!is_dir(TS_DIR)) return [];
+    $seen = [];
+    foreach (scandir(TS_DIR) as $f) {
+        if (preg_match('/^(\d{4})(\d{2})-.+\.json$/', $f, $m)) {
+            $key = $m[1] . $m[2];
+            $seen[$key] = ['year' => (int)$m[1], 'month' => (int)$m[2]];
+        }
+    }
+    krsort($seen);
+    return array_values($seen);
+}
+
+/** Returns ['user' => [entries...], ...] for the given month. */
+function ts_read_month_all_users(int $year, int $month): array {
+    if (!is_dir(TS_DIR)) return [];
+    $prefix = sprintf('%04d%02d-', $year, $month);
+    $suffix = '.json';
+    $out = [];
+    foreach (scandir(TS_DIR) as $f) {
+        if (strpos($f, $prefix) !== 0) continue;
+        if (substr($f, -strlen($suffix)) !== $suffix) continue;
+        $user = substr($f, strlen($prefix), -strlen($suffix));
+        if ($user === '') continue;
+        $entries = ts_read_user_month($year, $month, $user);
+        if (!empty($entries)) $out[$user] = $entries;
+    }
+    return $out;
+}
+
+/**
+ * Derives current toggle state for a user from their current-month file.
+ * 'started' iff the last entry's date is today AND kind is 'start'.
+ */
+function ts_state_for(string $user, int $now): string {
+    $year = (int)date('Y', $now);
+    $month = (int)date('n', $now);
+    $today = date('Y-m-d', $now);
+    $entries = ts_read_user_month($year, $month, $user);
+    if (empty($entries)) return 'stopped';
+    $last = $entries[count($entries) - 1];
+    // Always derive the entry's local date from its raw `ts` using TZ_VIEW;
+    // do not trust any stored `date` field — it may have been written under
+    // a different TZ_VIEW.
+    $ts = (int)($last['ts'] ?? 0);
+    $lastDate = $ts > 0 ? date('Y-m-d', $ts) : '';
+    if ($lastDate === $today && ($last['kind'] ?? '') === 'start') {
+        return 'started';
+    }
+    return 'stopped';
+}
+
+/** Fan out a chat message to everyone except $sender. Returns created records. */
+function fan_out_to_all(string $sender, string $text, int $now): array {
+    $targets = array_values(array_filter(all_usernames(), fn($u) => $u !== $sender));
+    if (empty($targets)) return [];
+    $groupId = uuid();
+    $created = [];
+    db_modify('messages.json', function (array &$messages) use ($sender, $text, $now, $targets, $groupId, &$created) {
+        foreach ($targets as $r) {
+            $rec = [
+                'id'             => uuid(),
+                'group_id'       => $groupId,
+                'sender'         => $sender,
+                'recipient'      => $r,
+                'text'           => $text,
+                'sent_at'        => $now,
+                'notified_at'    => null,
+                'notified_state' => null,
+                'opened_at'      => null,
+            ];
+            $messages[] = $rec;
+            $created[] = $rec;
+        }
+    });
+    return $created;
 }

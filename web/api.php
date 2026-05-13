@@ -105,6 +105,8 @@ function action_poll(): void {
         'server_time'     => $now,
         'my_muted_until'  => get_mute($me),
         'mutes'           => (object)active_mutes($now),
+        'ts_state'        => ts_state_for($me, $now),
+        'today_date'      => date('Y-m-d', $now),
     ]);
 }
 
@@ -238,6 +240,106 @@ function action_send(): void {
     ]);
 }
 
+function action_state_get(): void {
+    require_user();
+    send_json(['on' => state_get()]);
+}
+
+function action_state_toggle(): void {
+    $me = require_user();
+    if ($me !== 'amir') {
+        send_json(['error' => 'forbidden'], 403);
+        return;
+    }
+    $new = state_get() === 1 ? 0 : 1;
+    state_set($new);
+    send_json(['on' => $new]);
+}
+
+function action_ts_state(): void {
+    $me = require_user();
+    $now = time();
+    send_json([
+        'state'      => ts_state_for($me, $now),
+        'today_date' => date('Y-m-d', $now),
+    ]);
+}
+
+function action_ts_toggle(): void {
+    $me = require_user();
+    $now = time();
+    $today = date('Y-m-d', $now);
+    $year  = (int)date('Y', $now);
+    $month = (int)date('n', $now);
+
+    // Server is the source of truth: derive the new state by flipping the current one.
+    $current = ts_state_for($me, $now);
+    $newKind = $current === 'started' ? 'stop' : 'start';
+    $newState = $newKind === 'start' ? 'started' : 'stopped';
+
+    // Store only the raw timestamp + kind. Date/time strings are derived from
+    // ts on read, using TZ_VIEW — that way changing TZ_VIEW later reformats
+    // every existing entry consistently.
+    ts_append_user_month($year, $month, $me, [
+        'ts'   => $now,
+        'kind' => $newKind,
+    ]);
+
+    send_json([
+        'state'      => $newState,
+        'today_date' => $today,
+    ]);
+}
+
+function action_ts_months(): void {
+    require_user();
+    $months = ts_list_months();
+    // Always include the current month so the UI has at least one selectable option.
+    $now = time();
+    $cy = (int)date('Y', $now);
+    $cm = (int)date('n', $now);
+    $hasCurrent = false;
+    foreach ($months as $m) {
+        if ($m['year'] === $cy && $m['month'] === $cm) { $hasCurrent = true; break; }
+    }
+    if (!$hasCurrent) {
+        array_unshift($months, ['year' => $cy, 'month' => $cm]);
+    }
+    send_json($months);
+}
+
+function action_ts_month(): void {
+    require_user();
+    $year  = (int)($_GET['year']  ?? date('Y'));
+    $month = (int)($_GET['month'] ?? date('n'));
+    if ($year < 2000 || $year > 2100 || $month < 1 || $month > 12) {
+        send_json(['error' => 'bad year/month'], 400);
+        return;
+    }
+    $raw = ts_read_month_all_users($year, $month);
+    // Attach `date` and `time` strings derived from `ts` in TZ_VIEW. Any
+    // pre-existing `date`/`time` fields on legacy entries are ignored, so
+    // a future TZ_VIEW change rewrites every row consistently.
+    $entries = [];
+    foreach ($raw as $user => $list) {
+        $entries[$user] = array_map(function ($e) {
+            $ts = (int)($e['ts'] ?? 0);
+            return [
+                'ts'   => $ts,
+                'kind' => (string)($e['kind'] ?? ''),
+                'date' => $ts > 0 ? date('Y-m-d', $ts) : '',
+                'time' => $ts > 0 ? date('H:i', $ts)   : '',
+            ];
+        }, $list);
+    }
+    send_json([
+        'year'    => $year,
+        'month'   => $month,
+        'tz_view' => TZ_VIEW,
+        'entries' => (object)$entries,
+    ]);
+}
+
 $action = $_GET['action'] ?? '';
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
@@ -251,6 +353,12 @@ try {
         case 'GET:users':        action_users(); break;
         case 'POST:send':        action_send(); break;
         case 'POST:mute':        action_mute(); break;
+        case 'GET:ts_state':     action_ts_state(); break;
+        case 'POST:ts_toggle':   action_ts_toggle(); break;
+        case 'GET:ts_months':    action_ts_months(); break;
+        case 'GET:ts_month':     action_ts_month(); break;
+        case 'GET:state_get':    action_state_get(); break;
+        case 'POST:state_toggle': action_state_toggle(); break;
         default:
             send_json(['error' => 'unknown action', 'method' => $method, 'action' => $action], 404);
     }

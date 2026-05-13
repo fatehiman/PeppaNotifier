@@ -10,7 +10,13 @@ const api = {
     if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
     const tok = localStorage.getItem('token');
     if (tok) headers.Authorization = 'Bearer ' + tok;
-    const resp = await fetch(`${api.base}?action=${action}`, {
+    let url = `${api.base}?action=${action}`;
+    if (opts.query) {
+      for (const [k, v] of Object.entries(opts.query)) {
+        url += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(v);
+      }
+    }
+    const resp = await fetch(url, {
       method: opts.method || 'GET',
       headers,
       body: opts.body ? JSON.stringify(opts.body) : null,
@@ -33,6 +39,12 @@ const api = {
   send: (recipient, text) => api.call('send', { method: 'POST', body: { recipient, text } }),
   ackOpened: (ids) => api.call('ack_opened', { method: 'POST', body: { ids } }),
   mute: (until) => api.call('mute', { method: 'POST', body: { until } }),
+  tsState: () => api.call('ts_state'),
+  tsToggle: () => api.call('ts_toggle', { method: 'POST' }),
+  tsMonths: () => api.call('ts_months'),
+  tsMonth: (y, m) => api.call('ts_month', { query: { year: y, month: m } }),
+  stateGet: () => api.call('state_get'),
+  stateToggle: () => api.call('state_toggle', { method: 'POST' }),
 };
 
 const state = {
@@ -45,6 +57,14 @@ const state = {
   userMutes: {},         // {username: expiry_ts} for other users
   exited: false,
   sending: false,        // a /send HTTP request is currently in flight
+  workState: 'stopped',  // 'started' | 'stopped'
+  workToggling: false,   // POST ts_toggle in flight
+  todayDate: '',         // server's current YYYY-MM-DD
+  tsAvailableMonths: [], // [{year, month}, ...]
+  tsYear: 0,
+  tsMonth: 0,
+  stateOn: 0,            // 0 | 1 — for the amir-only ON/OFF menu
+  stateToggling: false,  // POST state_toggle in flight
 };
 
 function $(sel) { return document.querySelector(sel); }
@@ -65,6 +85,13 @@ function fmtRemaining(secsLeft) {
   const m = totalMin % 60;
   return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
 }
+function secsToHhmm(secs) {
+  if (!secs || secs <= 0) return '00:00';
+  const totalMin = Math.floor(secs / 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
 function compute2DaysUntil() {
   const now = new Date();
   const twoDays = new Date(now.getTime() + 2 * 86400_000);
@@ -75,21 +102,73 @@ function compute2DaysUntil() {
 }
 function isMuted() { return state.mutedUntil > nowSec(); }
 
+/* ---------- toast ---------- */
+let _toastTimer = null;
+let _toastHideTimer = null;
+function showToast(text, kind) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'toast' + (kind ? ' ' + kind : '');
+  el.classList.remove('hidden');
+  // force reflow so the transition replays even if .show was already on
+  void el.offsetWidth;
+  el.classList.add('show');
+  if (_toastTimer) clearTimeout(_toastTimer);
+  if (_toastHideTimer) clearTimeout(_toastHideTimer);
+  _toastTimer = setTimeout(() => {
+    el.classList.remove('show');
+    _toastHideTimer = setTimeout(() => el.classList.add('hidden'), 300);
+  }, 2200);
+}
+
+/* ---------- routing ---------- */
+function currentRoute() {
+  return location.hash === '#timesheet' ? 'timesheet' : 'home';
+}
+function applyRoute() {
+  if (!localStorage.getItem('token')) return;
+  if (state.exited) return;
+  if (currentRoute() === 'timesheet') showTimesheet();
+  else showChat();
+}
+function setActiveNav(name) {
+  document.getElementById('nav-home').classList.toggle('active', name === 'home');
+  document.getElementById('nav-timesheet').classList.toggle('active', name === 'timesheet');
+}
+
 /* ---------- view switching ---------- */
 function showLogin() {
+  $('#topbar').classList.add('hidden');
   $('#view-main').classList.add('hidden');
+  $('#view-timesheet').classList.add('hidden');
+  $('#view-exited').classList.add('hidden');
   $('#view-login').classList.remove('hidden');
   $('#login-username').value = '';
   $('#login-password').value = '';
   $('#login-error').textContent = '';
 }
-function showMain() {
+function showChat() {
   $('#view-login').classList.add('hidden');
+  $('#view-timesheet').classList.add('hidden');
+  $('#view-exited').classList.add('hidden');
+  $('#topbar').classList.remove('hidden');
   $('#view-main').classList.remove('hidden');
   $('#me-label').textContent = me();
+  setActiveNav('home');
   if (localStorage.getItem('soundEnabled') !== '1') {
     $('#enable-sound-banner').classList.remove('hidden');
   }
+}
+function showTimesheet() {
+  $('#view-login').classList.add('hidden');
+  $('#view-main').classList.add('hidden');
+  $('#view-exited').classList.add('hidden');
+  $('#topbar').classList.remove('hidden');
+  $('#view-timesheet').classList.remove('hidden');
+  $('#me-label').textContent = me();
+  setActiveNav('timesheet');
+  loadTimesheetMonths().then(renderTimesheet).catch(() => {});
 }
 
 /* ---------- history ---------- */
@@ -105,13 +184,10 @@ function renderHistory() {
     if (m._failed)  row.classList.add('failed');
 
     const isMine = m.sender === meName;
-    // Icon — sender side uses ticks (Telegram-style), receiver side uses the ring.
     let icon;
     if (m._pending)      icon = '⏳';
     else if (m._failed)  icon = '⚠';
     else if (isMine) {
-      // Sent. notified_at set means recipient's client has received it
-      // (notification fired, missed-window alert, or silently-during-mute).
       icon = m.notified_at ? '✓✓' : '✓';
     } else {
       icon = m.notified_state === 'notified' ? '🔔'
@@ -120,10 +196,6 @@ function renderHistory() {
     }
     if (isMine && !m._pending && !m._failed) row.classList.add(m.notified_at ? 'tick-double' : 'tick-single');
 
-    // Timing line.
-    //   Sender:   opened HH:MM   if recipient has opened the app
-    //             delivered HH:MM   if recipient's client has the msg but not opened
-    //   Receiver: received HH:MM    when my own client got the message
     let timingFrag = '';
     if (!m._pending && !m._failed) {
       if (isMine) {
@@ -152,7 +224,6 @@ function renderHistory() {
     });
     list.appendChild(row);
   }
-  // ack opened for received messages not yet opened
   const toAck = sorted.filter(m => m.recipient === meName && !m.opened_at).map(m => m.id);
   if (toAck.length) {
     api.ackOpened(toAck).then(() => {
@@ -230,6 +301,75 @@ async function chooseMute(seconds, twoDays) {
   }
 }
 
+/* ---------- on/off state (amir only) ---------- */
+function isAdminUser() { return me() === 'amir'; }
+
+function renderStateButton() {
+  const btn = document.getElementById('nav-state');
+  if (!btn) return;
+  if (!isAdminUser()) {
+    btn.classList.add('hidden');
+    return;
+  }
+  btn.classList.remove('hidden');
+  btn.disabled = state.stateToggling;
+  btn.classList.toggle('is-on', state.stateOn === 1);
+  btn.classList.toggle('is-off', state.stateOn !== 1);
+  btn.textContent = state.stateToggling ? '...' : (state.stateOn === 1 ? 'ON' : 'OFF');
+}
+
+async function loadStateOnce() {
+  if (!isAdminUser()) return;
+  try {
+    const r = await api.stateGet();
+    state.stateOn = (r && r.on === 1) ? 1 : 0;
+  } catch (_) { state.stateOn = 0; }
+  renderStateButton();
+}
+
+async function onToggleState() {
+  if (!isAdminUser()) return;
+  if (state.stateToggling) return;
+  state.stateToggling = true;
+  renderStateButton();
+  try {
+    const r = await api.stateToggle();
+    state.stateOn = (r && r.on === 1) ? 1 : 0;
+  } catch (e) {
+    alert('Toggle failed: ' + e.message);
+  } finally {
+    state.stateToggling = false;
+    renderStateButton();
+  }
+}
+
+/* ---------- work toggle ---------- */
+function renderWorkButton() {
+  const btn = document.getElementById('nav-work-toggle');
+  if (!btn) return;
+  btn.disabled = state.workToggling;
+  btn.classList.toggle('is-working', state.workState === 'started');
+  btn.textContent = state.workToggling
+    ? '...'
+    : (state.workState === 'started' ? 'Stop' : 'Start');
+}
+async function onToggleWork() {
+  if (state.workToggling) return;
+  state.workToggling = true;
+  renderWorkButton();
+  try {
+    const r = await api.tsToggle();
+    state.workState = r.state || 'stopped';
+    state.todayDate = r.today_date || state.todayDate;
+    showToast(state.workState === 'started' ? 'Started!' : 'Stopped!', 'success');
+  } catch (e) {
+    showToast('Toggle failed: ' + e.message, 'warn');
+  } finally {
+    state.workToggling = false;
+    renderWorkButton();
+  }
+}
+
 /* ---------- polling ---------- */
 async function pollOnce() {
   try {
@@ -245,13 +385,22 @@ async function pollOnce() {
       state.messages.set(m.id, m);
       dirty = true;
     }
-    // mute state
     const newMutedUntil = r.my_muted_until || 0;
     if (newMutedUntil !== state.mutedUntil) {
       state.mutedUntil = newMutedUntil;
       renderMuteButton();
     }
     state.userMutes = r.mutes || {};
+
+    // Work toggle reconciliation (handles midnight rollover for free).
+    const newWork = r.ts_state || 'stopped';
+    const newToday = r.today_date || '';
+    if (newWork !== state.workState || newToday !== state.todayDate) {
+      state.workState = newWork;
+      state.todayDate = newToday;
+      if (!state.workToggling) renderWorkButton();
+    }
+
     if (dirty) renderHistory();
     if (fresh.length && state.bootstrapped) notifyNew(fresh);
   } catch (e) {
@@ -321,7 +470,6 @@ async function openSendModal(recipient, userInfo) {
     lsEl.textContent = userInfo.last_seen ? `(last seen ${fmtTs(userInfo.last_seen)})` : '(never seen)';
   } else {
     lsEl.textContent = '';
-    // fetch fresh state for this user
     try {
       const list = await api.users();
       const u = list.find(x => x.username === recipient);
@@ -353,9 +501,6 @@ async function doSend(recipient, text) {
   const sentAt = nowSec();
   const tmpGroup = 'tmp-' + tempId();
 
-  // For non-ALL we render exactly one optimistic row. For ALL we don't yet know
-  // the recipient list, so render one placeholder row with recipient="ALL";
-  // when /send returns we'll replace it with N real per-recipient rows.
   const tmp = {
     id: tempId(),
     group_id: tmpGroup,
@@ -373,14 +518,11 @@ async function doSend(recipient, text) {
 
   try {
     const r = await api.send(recipient, text);
-    // remove the optimistic placeholder
     state.messages.delete(tmp.id);
-    // adopt the real records from the server response (per-recipient for ALL)
     if (r && Array.isArray(r.messages)) {
       for (const m of r.messages) state.messages.set(m.id, m);
     }
     renderHistory();
-    // an immediate poll picks up any notify/open state that landed in the meantime
     pollOnce();
   } catch (e) {
     const t = state.messages.get(tmp.id);
@@ -392,12 +534,185 @@ async function doSend(recipient, text) {
   }
 }
 
+/* ---------- timesheet ---------- */
+const WEEKDAY_SHORT = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+async function loadTimesheetMonths() {
+  let months = [];
+  try { months = await api.tsMonths(); }
+  catch (_) { months = []; }
+  if (!Array.isArray(months) || months.length === 0) {
+    const d = new Date();
+    months = [{ year: d.getFullYear(), month: d.getMonth() + 1 }];
+  }
+  state.tsAvailableMonths = months;
+
+  // Pick the most recent month as the default selection.
+  if (!state.tsYear || !state.tsMonth ||
+      !months.some(x => x.year === state.tsYear && x.month === state.tsMonth)) {
+    state.tsYear = months[0].year;
+    state.tsMonth = months[0].month;
+  }
+
+  const yearSel = $('#ts-year');
+  yearSel.innerHTML = '';
+  const years = [...new Set(months.map(m => m.year))].sort((a, b) => b - a);
+  for (const y of years) {
+    const opt = document.createElement('option');
+    opt.value = String(y); opt.textContent = String(y);
+    yearSel.appendChild(opt);
+  }
+  yearSel.value = String(state.tsYear);
+
+  populateMonthOptions();
+}
+
+function populateMonthOptions() {
+  const monthSel = $('#ts-month');
+  monthSel.innerHTML = '';
+  const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const monthsForYear = state.tsAvailableMonths
+    .filter(m => m.year === state.tsYear)
+    .map(m => m.month);
+  const sorted = [...new Set(monthsForYear)].sort((a, b) => b - a);
+  for (const m of sorted) {
+    const opt = document.createElement('option');
+    opt.value = String(m); opt.textContent = names[m - 1];
+    monthSel.appendChild(opt);
+  }
+  if (!sorted.includes(state.tsMonth)) {
+    state.tsMonth = sorted[0] || state.tsMonth;
+  }
+  monthSel.value = String(state.tsMonth);
+}
+
+function computeDayStats(entries) {
+  // entries: same-day entries for one user, sorted by ts ascending.
+  let firstStart = null;
+  let lastStop = null;
+  let gapSecs = 0;
+  let workSecs = 0;
+  let inSession = false;
+  let sessionStartTs = null;
+  let lastStopTs = null;
+
+  for (const e of entries) {
+    if (e.kind === 'start') {
+      if (!firstStart) firstStart = e;
+      if (!inSession) {
+        if (lastStopTs !== null) gapSecs += (e.ts - lastStopTs);
+        sessionStartTs = e.ts;
+        inSession = true;
+      }
+      // double-start: ignore, keep first start time
+    } else if (e.kind === 'stop') {
+      if (inSession) {
+        workSecs += (e.ts - sessionStartTs);
+        lastStopTs = e.ts;
+        lastStop = e;
+        inSession = false;
+      }
+      // orphan stop (no matching start): ignore
+    }
+  }
+
+  const open = inSession;
+  return {
+    startStr: firstStart ? firstStart.time : '—',
+    stopStr:  open ? '—' : (lastStop ? lastStop.time : '—'),
+    gapsStr:  secsToHhmm(gapSecs),
+    totalStr: open ? '—' : secsToHhmm(workSecs),
+    totalSecs: open ? 0 : workSecs,
+  };
+}
+
+async function renderTimesheet() {
+  if (!state.tsYear || !state.tsMonth) return;
+  const status = $('#ts-status');
+  status.textContent = 'Loading…';
+
+  let data;
+  try {
+    data = await api.tsMonth(state.tsYear, state.tsMonth);
+  } catch (e) {
+    status.textContent = 'Failed to load: ' + e.message;
+    return;
+  }
+  status.textContent = '';
+
+  const year = data.year;
+  const month = data.month;
+  const entries = data.entries || {};
+
+  const tbody = $('#ts-table tbody');
+  const summaryTbody = $('#ts-summary tbody');
+  tbody.innerHTML = '';
+  summaryTbody.innerHTML = '';
+
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const userTotals = {};
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateObj = new Date(year, month - 1, d);
+    const weekdayIdx = dateObj.getDay();
+    const weekdayShort = WEEKDAY_SHORT[weekdayIdx];
+    const isWeekend = weekdayIdx === 0 || weekdayIdx === 6; // Sat=6, Sun=0
+    const dateStr = `${year}-${pad(month)}-${pad(d)}`;
+
+    const usersOnDay = [];
+    for (const [user, list] of Object.entries(entries)) {
+      const dayEntries = list
+        .filter(e => e && e.date === dateStr)
+        .sort((a, b) => (a.ts || 0) - (b.ts || 0));
+      if (dayEntries.length) usersOnDay.push({ user, dayEntries });
+    }
+    usersOnDay.sort((a, b) => a.user.localeCompare(b.user));
+
+    if (usersOnDay.length === 0) {
+      const tr = document.createElement('tr');
+      tr.className = 'empty' + (isWeekend ? ' weekend' : '');
+      tr.innerHTML =
+        `<td>${d}</td><td>${weekdayShort}</td>` +
+        `<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>`;
+      tbody.appendChild(tr);
+    } else {
+      for (const { user, dayEntries } of usersOnDay) {
+        const s = computeDayStats(dayEntries);
+        userTotals[user] = (userTotals[user] || 0) + s.totalSecs;
+        const tr = document.createElement('tr');
+        if (isWeekend) tr.classList.add('weekend');
+        tr.innerHTML =
+          `<td>${d}</td><td>${weekdayShort}</td>` +
+          `<td>${escapeHtml(user)}</td>` +
+          `<td>${s.startStr}</td><td>${s.stopStr}</td>` +
+          `<td>${s.gapsStr}</td><td>${s.totalStr}</td>`;
+        tbody.appendChild(tr);
+      }
+    }
+  }
+
+  const summaryUsers = Object.keys(userTotals).sort();
+  if (summaryUsers.length === 0) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="2" style="color:#9ca3af">No entries for this month.</td>';
+    summaryTbody.appendChild(tr);
+  } else {
+    for (const u of summaryUsers) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `<td>${escapeHtml(u)}</td><td>${secsToHhmm(userTotals[u])}</td>`;
+      summaryTbody.appendChild(tr);
+    }
+  }
+}
+
 /* ---------- exit / resume ---------- */
 function exitApp() {
   state.exited = true;
   stopPolling();
   stopMuteTicker();
+  $('#topbar').classList.add('hidden');
   $('#view-main').classList.add('hidden');
+  $('#view-timesheet').classList.add('hidden');
   $('#view-login').classList.add('hidden');
   $('#view-exited').classList.remove('hidden');
 }
@@ -429,6 +744,8 @@ async function onLogout(silent) {
   state.messages.clear();
   state.mutedUntil = 0;
   state.bootstrapped = false;
+  state.workState = 'stopped';
+  state.workToggling = false;
   try { if (!silent) await api.logout(); } catch (_) {}
   localStorage.removeItem('token');
   localStorage.removeItem('user');
@@ -438,7 +755,6 @@ async function onLogout(silent) {
 
 /* ---------- sound activation ---------- */
 async function enableSound() {
-  // unlock audio with the user gesture
   const a = $('#notify-audio');
   try { a.muted = true; await a.play(); a.pause(); a.currentTime = 0; a.muted = false; } catch (_) {}
   if ('Notification' in window && Notification.permission === 'default') {
@@ -450,7 +766,10 @@ async function enableSound() {
 
 /* ---------- bootstrap ---------- */
 async function bootstrap() {
-  showMain();
+  applyRoute();
+  renderWorkButton();
+  renderStateButton();
+  loadStateOnce();
   try {
     const hist = await api.history();
     state.messages.clear();
@@ -491,14 +810,40 @@ function wire() {
     doSend(recipient, 'ping!');
   });
   $('#btn-mute').addEventListener('click', openMuteModal);
-  $('#btn-exit').addEventListener('click', exitApp);
   $('#btn-resume').addEventListener('click', resumeApp);
+  $('#me-logout').addEventListener('click', (ev) => {
+    ev.preventDefault();
+    onLogout(false);
+  });
   document.querySelectorAll('.mute-opt').forEach(el => {
     el.addEventListener('click', () => {
       const secs = parseInt(el.getAttribute('data-mute-seconds') || '0', 10);
       const two = el.getAttribute('data-mute-2days') === '1';
       chooseMute(secs, two);
     });
+  });
+
+  $('#nav-home').addEventListener('click', () => {
+    if (location.hash) location.hash = '';
+    else applyRoute();
+  });
+  $('#nav-timesheet').addEventListener('click', () => {
+    if (location.hash !== '#timesheet') location.hash = '#timesheet';
+    else applyRoute();
+  });
+  $('#nav-work-toggle').addEventListener('click', onToggleWork);
+  $('#nav-state').addEventListener('click', onToggleState);
+
+  window.addEventListener('hashchange', applyRoute);
+
+  $('#ts-year').addEventListener('change', (ev) => {
+    state.tsYear = parseInt(ev.target.value, 10);
+    populateMonthOptions();
+    renderTimesheet();
+  });
+  $('#ts-month').addEventListener('change', (ev) => {
+    state.tsMonth = parseInt(ev.target.value, 10);
+    renderTimesheet();
   });
 }
 
