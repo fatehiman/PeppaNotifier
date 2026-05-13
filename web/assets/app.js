@@ -59,6 +59,7 @@ const state = {
   sending: false,        // a /send HTTP request is currently in flight
   workState: 'stopped',  // 'started' | 'stopped'
   workToggling: false,   // POST ts_toggle in flight
+  workLoaded: false,     // false until the first poll response comes back
   todayDate: '',         // server's current YYYY-MM-DD
   tsAvailableMonths: [], // [{year, month}, ...]
   tsYear: 0,
@@ -66,6 +67,7 @@ const state = {
   tsRowLogs: new Map(), // key="user|YYYY-MM-DD" → [entries] for the (i) modal
   stateOn: 0,            // 0 | 1 — for the amir-only ON/OFF menu
   stateToggling: false,  // POST state_toggle in flight
+  stateLoaded: false,    // false until state_get returns
 };
 
 function $(sel) { return document.querySelector(sel); }
@@ -313,10 +315,18 @@ function renderStateButton() {
     return;
   }
   btn.classList.remove('hidden');
+  const label = btn.querySelector('.switch-label');
+  if (!state.stateLoaded) {
+    btn.disabled = true;
+    btn.classList.add('loading');
+    btn.classList.remove('is-on');
+    if (label) label.textContent = '—';
+    return;
+  }
+  btn.classList.remove('loading');
   btn.disabled = state.stateToggling;
   const on = state.stateOn === 1;
   btn.classList.toggle('is-on', on);
-  const label = btn.querySelector('.switch-label');
   if (label) label.textContent = state.stateToggling ? '...' : (on ? 'ON' : 'OFF');
 }
 
@@ -325,7 +335,8 @@ async function loadStateOnce() {
   try {
     const r = await api.stateGet();
     state.stateOn = (r && r.on === 1) ? 1 : 0;
-  } catch (_) { state.stateOn = 0; }
+    state.stateLoaded = true;
+  } catch (_) { /* leave stateLoaded=false so the switch keeps showing loading */ }
   renderStateButton();
 }
 
@@ -349,12 +360,21 @@ async function onToggleState() {
 function renderWorkButton() {
   const btn = document.getElementById('nav-work-toggle');
   if (!btn) return;
-  btn.disabled = state.workToggling;
-  const working = state.workState === 'started';
-  btn.classList.toggle('is-working', working);
   const iconEl = btn.querySelector('.work-icon');
   const labelEl = btn.querySelector('.work-label');
   if (!iconEl || !labelEl) return;
+  if (!state.workLoaded) {
+    btn.disabled = true;
+    btn.classList.add('loading');
+    btn.classList.remove('is-working');
+    iconEl.textContent = '⏳';
+    labelEl.textContent = '—';
+    return;
+  }
+  btn.classList.remove('loading');
+  btn.disabled = state.workToggling;
+  const working = state.workState === 'started';
+  btn.classList.toggle('is-working', working);
   if (state.workToggling) {
     iconEl.textContent = '⏳';
     labelEl.textContent = '...';
@@ -411,7 +431,9 @@ async function pollOnce() {
     // Work toggle reconciliation (handles midnight rollover for free).
     const newWork = r.ts_state || 'stopped';
     const newToday = r.today_date || '';
-    if (newWork !== state.workState || newToday !== state.todayDate) {
+    const wasLoaded = state.workLoaded;
+    state.workLoaded = true;
+    if (!wasLoaded || newWork !== state.workState || newToday !== state.todayDate) {
       state.workState = newWork;
       state.todayDate = newToday;
       if (!state.workToggling) renderWorkButton();
@@ -785,6 +807,10 @@ async function onLogout(silent) {
   state.bootstrapped = false;
   state.workState = 'stopped';
   state.workToggling = false;
+  state.workLoaded = false;
+  state.stateOn = 0;
+  state.stateToggling = false;
+  state.stateLoaded = false;
   try { if (!silent) await api.logout(); } catch (_) {}
   localStorage.removeItem('token');
   localStorage.removeItem('user');
