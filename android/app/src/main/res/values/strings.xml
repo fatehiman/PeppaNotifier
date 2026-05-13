@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PeppaNotifier</string>
+    <string name="login_title">PeppaNotifier</string>
+    <string name="hint_username">Username</string>
+    <string name="hint_password">Password</string>
+    <string name="action_login">Login</string>
+    <string name="action_send">Send</string>
+    <string name="action_ping">Ping</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_logout">Logout</string>
+    <string name="action_users">Send</string>
+    <string name="users_title">Pick a user</string>
+    <string name="user_all">ALL</string>
+    <string name="ping_text">ping!</string>
+    <string name="hint_message">Type a message…</string>
+    <string name="service_running">PeppaNotifier running</string>
+    <string name="service_channel_name">PeppaNotifier service</string>
+    <string name="service_channel_desc">Keeps the app polling for new messages.</string>
+    <string name="messages_channel_name">New messages</string>
+    <string name="messages_channel_desc">Per-message notifications.</string>
+    <string name="last_seen_fmt">last seen %1$s</string>
+    <string name="last_seen_paren_fmt">(last seen %1$s)</string>
+    <string name="offline">(never seen)</string>
+    <string name="invalid_credentials">Invalid credentials</string>
+    <string name="login_error_generic">Login failed: %1$s</string>
+    <string name="send_failed">Send failed: %1$s</string>
+    <string name="ping_label">PING</string>
+    <string name="action_mute">Mute</string>
+    <string name="action_exit">Exit</string>
+    <string name="mute_title">Mute notifications for…</string>
+    <string name="mute_5m">5m</string>
+    <string name="mute_15m">15m</string>
+    <string name="mute_1h">1h</string>
+    <string name="mute_2h">2h</string>
+    <string name="mute_3h">3h</string>
+    <string name="mute_8h">8h</string>
+    <string name="mute_10h">10h</string>
+    <string name="mute_12h">12h</string>
+    <string name="mute_2days">2days</string>
+    <string name="action_unmute">Unmute</string>
+    <string name="zzz_fmt">Zzz %1$s</string>
+</resources>

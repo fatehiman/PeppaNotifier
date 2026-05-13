@@ -1,0 +1,15 @@
+# Runtime state — written by api.php at runtime; recreated on first request.
+# Tracking these would leak session tokens and pollute the repo with churn.
+web/data/sessions.json
+web/data/online.json
+web/data/mutes.json
+web/data/messages.json
+web/data/api.log
+
+# Local logs
+*.log
+
+# OS metadata
+.DS_Store
+Thumbs.db
+desktop.ini

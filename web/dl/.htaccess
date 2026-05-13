@@ -1,0 +1,9 @@
+AddType application/vnd.android.package-archive .apk
+
+# Force "Save as" / let Android recognize the install intent rather than render inline.
+<FilesMatch "\.apk$">
+    Header set Content-Disposition "attachment"
+    Header set Cache-Control "public, max-age=300"
+</FilesMatch>
+
+Options -Indexes

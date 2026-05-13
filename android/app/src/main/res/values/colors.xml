@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="primary">#2D72D9</color>
+    <color name="primary_dark">#225BB0</color>
+    <color name="accent">#D49B00</color>
+    <color name="bg">#F4F5F7</color>
+    <color name="surface">#FFFFFF</color>
+    <color name="text_primary">#222222</color>
+    <color name="text_secondary">#666666</color>
+    <color name="online">#2ECC71</color>
+    <color name="offline">#BBBBBB</color>
+    <color name="opened">#2D8A3E</color>
+    <color name="delivered">#4B5563</color>
+    <color name="failed">#B91C1C</color>
+    <color name="pending">#92400E</color>
+    <color name="divider">#E5E7EB</color>
+    <color name="white">#FFFFFF</color>
+</resources>
