@@ -63,6 +63,7 @@ const state = {
   tsAvailableMonths: [], // [{year, month}, ...]
   tsYear: 0,
   tsMonth: 0,
+  tsRowLogs: new Map(), // key="user|YYYY-MM-DD" → [entries] for the (i) modal
   stateOn: 0,            // 0 | 1 — for the amir-only ON/OFF menu
   stateToggling: false,  // POST state_toggle in flight
 };
@@ -313,9 +314,10 @@ function renderStateButton() {
   }
   btn.classList.remove('hidden');
   btn.disabled = state.stateToggling;
-  btn.classList.toggle('is-on', state.stateOn === 1);
-  btn.classList.toggle('is-off', state.stateOn !== 1);
-  btn.textContent = state.stateToggling ? '...' : (state.stateOn === 1 ? 'ON' : 'OFF');
+  const on = state.stateOn === 1;
+  btn.classList.toggle('is-on', on);
+  const label = btn.querySelector('.switch-label');
+  if (label) label.textContent = state.stateToggling ? '...' : (on ? 'ON' : 'OFF');
 }
 
 async function loadStateOnce() {
@@ -348,10 +350,23 @@ function renderWorkButton() {
   const btn = document.getElementById('nav-work-toggle');
   if (!btn) return;
   btn.disabled = state.workToggling;
-  btn.classList.toggle('is-working', state.workState === 'started');
-  btn.textContent = state.workToggling
-    ? '...'
-    : (state.workState === 'started' ? 'Stop' : 'Start');
+  const working = state.workState === 'started';
+  btn.classList.toggle('is-working', working);
+  const iconEl = btn.querySelector('.work-icon');
+  const labelEl = btn.querySelector('.work-label');
+  if (!iconEl || !labelEl) return;
+  if (state.workToggling) {
+    iconEl.textContent = '⏳';
+    labelEl.textContent = '...';
+  } else if (working) {
+    // Currently working → next action is stop. Both icon and label say "stop".
+    iconEl.textContent = '⏹';
+    labelEl.textContent = 'Stop';
+  } else {
+    // Currently idle → next action is start.
+    iconEl.textContent = '▶';
+    labelEl.textContent = 'Start';
+  }
 }
 async function onToggleWork() {
   if (state.workToggling) return;
@@ -362,6 +377,7 @@ async function onToggleWork() {
     state.workState = r.state || 'stopped';
     state.todayDate = r.today_date || state.todayDate;
     showToast(state.workState === 'started' ? 'Started!' : 'Stopped!', 'success');
+    if (currentRoute() === 'timesheet') renderTimesheet();
   } catch (e) {
     showToast('Toggle failed: ' + e.message, 'warn');
   } finally {
@@ -487,6 +503,22 @@ function closeAllModals() {
   $('#modal-users').classList.add('hidden');
   $('#modal-send').classList.add('hidden');
   $('#modal-mute').classList.add('hidden');
+  $('#modal-log').classList.add('hidden');
+}
+
+function openLogModal(label, entries) {
+  $('#log-title').textContent = label;
+  const tbody = $('#modal-log tbody');
+  tbody.innerHTML = '';
+  for (const e of entries) {
+    const tr = document.createElement('tr');
+    tr.className = 'kind-' + (e.kind || '');
+    tr.innerHTML =
+      `<td class="log-kind">${escapeHtml(e.kind || '')}</td>` +
+      `<td class="log-time">${escapeHtml(e.time || '—')}</td>`;
+    tbody.appendChild(tr);
+  }
+  $('#modal-log').classList.remove('hidden');
 }
 
 /* ---------- send / ping (optimistic) ---------- */
@@ -648,6 +680,7 @@ async function renderTimesheet() {
   const summaryTbody = $('#ts-summary tbody');
   tbody.innerHTML = '';
   summaryTbody.innerHTML = '';
+  state.tsRowLogs.clear();
 
   const daysInMonth = new Date(year, month, 0).getDate();
   const userTotals = {};
@@ -679,13 +712,19 @@ async function renderTimesheet() {
       for (const { user, dayEntries } of usersOnDay) {
         const s = computeDayStats(dayEntries);
         userTotals[user] = (userTotals[user] || 0) + s.totalSecs;
+        const logKey = `${user}|${dateStr}`;
+        state.tsRowLogs.set(logKey, dayEntries);
         const tr = document.createElement('tr');
         if (isWeekend) tr.classList.add('weekend');
+        const logBtn =
+          `<button type="button" class="log-btn" data-log-key="${escapeHtml(logKey)}" ` +
+          `title="Show ${escapeHtml(user)}'s log for ${dateStr}" aria-label="Show log">ⓘ</button>`;
         tr.innerHTML =
           `<td>${d}</td><td>${weekdayShort}</td>` +
           `<td>${escapeHtml(user)}</td>` +
           `<td>${s.startStr}</td><td>${s.stopStr}</td>` +
-          `<td>${s.gapsStr}</td><td>${s.totalStr}</td>`;
+          `<td>${s.gapsStr}</td>` +
+          `<td class="total">${s.totalStr}${logBtn}</td>`;
         tbody.appendChild(tr);
       }
     }
@@ -835,6 +874,16 @@ function wire() {
   $('#nav-state').addEventListener('click', onToggleState);
 
   window.addEventListener('hashchange', applyRoute);
+
+  $('#ts-table').addEventListener('click', (ev) => {
+    const btn = ev.target.closest('.log-btn');
+    if (!btn) return;
+    const key = btn.getAttribute('data-log-key');
+    const entries = state.tsRowLogs.get(key);
+    if (!entries) return;
+    const [user, dateStr] = key.split('|');
+    openLogModal(`${user} — ${dateStr}`, entries);
+  });
 
   $('#ts-year').addEventListener('change', (ev) => {
     state.tsYear = parseInt(ev.target.value, 10);

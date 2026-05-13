@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PeppaNotifier</title>
-  <link rel="stylesheet" href="assets/style.css?v=7">
+  <link rel="stylesheet" href="assets/style.css?v=11">
 </head>
 <body>
 
@@ -12,9 +12,15 @@
   <span class="brand">PeppaNotifier</span>
   <nav class="topnav">
     <button type="button" id="nav-home" class="nav-btn">Home</button>
-    <button type="button" id="nav-work-toggle" class="nav-btn">Start</button>
+    <button type="button" id="nav-work-toggle" class="nav-btn nav-work">
+      <span class="work-icon" aria-hidden="true">▶</span>
+      <span class="work-label">Start</span>
+    </button>
     <button type="button" id="nav-timesheet" class="nav-btn">Timesheet</button>
-    <button type="button" id="nav-state" class="nav-btn hidden">OFF</button>
+    <button type="button" id="nav-state" class="nav-switch hidden" aria-label="Toggle state">
+      <span class="switch-track"><span class="switch-thumb"></span></span>
+      <span class="switch-label">OFF</span>
+    </button>
   </nav>
   <a href="#" id="me-logout" class="me-logout" title="Click to logout">
     <span class="power-icon" aria-hidden="true">⏻</span>
@@ -134,10 +140,22 @@
   </div>
 </div>
 
+<div id="modal-log" class="modal hidden">
+  <div class="modal-card modal-log-card">
+    <header class="modal-head">
+      <span id="log-title"></span>
+      <button class="x" data-close>&times;</button>
+    </header>
+    <table class="log-table">
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
 <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
 <audio id="notify-audio" src="assets/notify.mp3" preload="auto"></audio>
 
-<script src="assets/app.js?v=7"></script>
+<script src="assets/app.js?v=11"></script>
 </body>
 </html>
