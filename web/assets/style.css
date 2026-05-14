@@ -322,6 +322,13 @@ body { display: flex; flex-direction: column; }
   text-align: left;
   font-variant-numeric: tabular-nums;
 }
+.ts-table td.daycell { white-space: nowrap; }
+@media (max-width: 720px) {
+  .ts-table th, .ts-table td,
+  .ts-summary th, .ts-summary td {
+    padding: 6px 5px;
+  }
+}
 .ts-table th, .ts-summary th { background: #f3f4f6; font-weight: 600; }
 .ts-table tr:last-child td, .ts-summary tr:last-child td { border-bottom: 0; }
 .ts-table tr.weekend td { background: #fef3c7; }
