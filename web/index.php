@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PeppaNotifier</title>
-  <link rel="stylesheet" href="assets/style.css?v=12">
+  <link rel="stylesheet" href="assets/style.css?v=13">
 </head>
 <body>
 
@@ -64,7 +64,6 @@
       <thead>
         <tr>
           <th>Day</th>
-          <th>Weekday</th>
           <th>User</th>
           <th>Start</th>
           <th>Stop</th>
@@ -156,6 +155,6 @@
 
 <audio id="notify-audio" src="assets/notify.mp3" preload="auto"></audio>
 
-<script src="assets/app.js?v=12"></script>
+<script src="assets/app.js?v=13"></script>
 </body>
 </html>

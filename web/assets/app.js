@@ -723,12 +723,11 @@ async function renderTimesheet() {
     }
     usersOnDay.sort((a, b) => a.user.localeCompare(b.user));
 
+    const dayCell = `<td class="daycell">${d} ${weekdayShort}</td>`;
     if (usersOnDay.length === 0) {
       const tr = document.createElement('tr');
       tr.className = 'empty' + (isWeekend ? ' weekend' : '');
-      tr.innerHTML =
-        `<td>${d}</td><td>${weekdayShort}</td>` +
-        `<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>`;
+      tr.innerHTML = dayCell + `<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>`;
       tbody.appendChild(tr);
     } else {
       for (const { user, dayEntries } of usersOnDay) {
@@ -742,7 +741,7 @@ async function renderTimesheet() {
           `<button type="button" class="log-btn" data-log-key="${escapeHtml(logKey)}" ` +
           `title="Show ${escapeHtml(user)}'s log for ${dateStr}" aria-label="Show log">ⓘ</button>`;
         tr.innerHTML =
-          `<td>${d}</td><td>${weekdayShort}</td>` +
+          dayCell +
           `<td>${escapeHtml(user)}</td>` +
           `<td>${s.startStr}</td><td>${s.stopStr}</td>` +
           `<td>${s.gapsStr}</td>` +
