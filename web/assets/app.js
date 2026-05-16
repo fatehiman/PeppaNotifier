@@ -43,6 +43,9 @@ const api = {
   tsToggle: () => api.call('ts_toggle', { method: 'POST' }),
   tsMonths: () => api.call('ts_months'),
   tsMonth: (y, m) => api.call('ts_month', { query: { year: y, month: m } }),
+  tsReplaceDay: (user, date, entries) => api.call('ts_replace_day', {
+    method: 'POST', body: { user, date, entries },
+  }),
   stateGet: () => api.call('state_get'),
   stateToggle: () => api.call('state_toggle', { method: 'POST' }),
 };
@@ -526,6 +529,7 @@ function closeAllModals() {
   $('#modal-send').classList.add('hidden');
   $('#modal-mute').classList.add('hidden');
   $('#modal-log').classList.add('hidden');
+  $('#modal-log-edit').classList.add('hidden');
 }
 
 function openLogModal(label, entries) {
@@ -541,6 +545,68 @@ function openLogModal(label, entries) {
     tbody.appendChild(tr);
   }
   $('#modal-log').classList.remove('hidden');
+}
+
+/* ---------- log edit modal (amir only, brand-new flow) ---------- */
+let editCtx = null;  // {user, date}
+
+function makeEditRow(kind, time) {
+  const tr = document.createElement('tr');
+  const startSel = kind === 'stop' ? '' : ' selected';
+  const stopSel  = kind === 'stop' ? ' selected' : '';
+  tr.innerHTML =
+    '<td><select class="log-edit-kind">' +
+      `<option value="start"${startSel}>start</option>` +
+      `<option value="stop"${stopSel}>stop</option>` +
+    '</select></td>' +
+    `<td><input type="time" class="log-edit-time" value="${escapeHtml(time || '08:00')}" step="60"></td>` +
+    '<td><button type="button" class="log-edit-del" aria-label="Delete row">×</button></td>';
+  tr.querySelector('.log-edit-del').addEventListener('click', () => tr.remove());
+  return tr;
+}
+
+function openLogEditModal(user, dateStr, entries) {
+  editCtx = { user, date: dateStr };
+  $('#log-edit-title').textContent = `Edit — ${user} — ${dateStr}`;
+  $('#log-edit-error').textContent = '';
+  const tbody = $('#modal-log-edit tbody');
+  tbody.innerHTML = '';
+  for (const e of entries) {
+    tbody.appendChild(makeEditRow(e.kind || 'start', e.time || '08:00'));
+  }
+  $('#modal-log-edit').classList.remove('hidden');
+}
+
+async function saveLogEdit() {
+  if (!editCtx) return;
+  const tbody = $('#modal-log-edit tbody');
+  const rows = [...tbody.querySelectorAll('tr')];
+  const entries = [];
+  for (let i = 0; i < rows.length; i++) {
+    const kindEl = rows[i].querySelector('.log-edit-kind');
+    const timeEl = rows[i].querySelector('.log-edit-time');
+    const kind = kindEl ? kindEl.value : '';
+    const time = timeEl ? timeEl.value : '';
+    if (!/^\d{1,2}:\d{2}$/.test(time)) {
+      $('#log-edit-error').textContent = `Row ${i + 1}: invalid time`;
+      return;
+    }
+    entries.push({ kind, time });
+  }
+  $('#log-edit-error').textContent = '';
+  const saveBtn = $('#log-edit-save');
+  saveBtn.disabled = true;
+  try {
+    await api.tsReplaceDay(editCtx.user, editCtx.date, entries);
+    closeAllModals();
+    editCtx = null;
+    renderTimesheet();
+    showToast('Saved!', 'success');
+  } catch (e) {
+    $('#log-edit-error').textContent = 'Save failed: ' + e.message;
+  } finally {
+    saveBtn.disabled = false;
+  }
 }
 
 /* ---------- send / ping (optimistic) ---------- */
@@ -724,6 +790,7 @@ async function renderTimesheet() {
     usersOnDay.sort((a, b) => a.user.localeCompare(b.user));
 
     const dayCell = `<td class="daycell">${d} ${weekdayShort}</td>`;
+    const canEdit = isAdminUser();
     if (usersOnDay.length === 0) {
       const tr = document.createElement('tr');
       tr.className = 'empty' + (isWeekend ? ' weekend' : '');
@@ -740,12 +807,16 @@ async function renderTimesheet() {
         const logBtn =
           `<button type="button" class="log-btn" data-log-key="${escapeHtml(logKey)}" ` +
           `title="Show ${escapeHtml(user)}'s log for ${dateStr}" aria-label="Show log">ⓘ</button>`;
+        const editBtn = canEdit
+          ? `<button type="button" class="log-edit-btn" data-log-key="${escapeHtml(logKey)}" ` +
+            `title="Edit ${escapeHtml(user)}'s entries for ${dateStr}" aria-label="Edit log">✎</button>`
+          : '';
         tr.innerHTML =
           dayCell +
           `<td>${escapeHtml(user)}</td>` +
           `<td>${s.startStr}</td><td>${s.stopStr}</td>` +
           `<td>${s.gapsStr}</td>` +
-          `<td class="total">${s.totalStr}${logBtn}</td>`;
+          `<td class="total">${s.totalStr}${logBtn}${editBtn}</td>`;
         tbody.appendChild(tr);
       }
     }
@@ -901,6 +972,14 @@ function wire() {
   window.addEventListener('hashchange', applyRoute);
 
   $('#ts-table').addEventListener('click', (ev) => {
+    const editBtn = ev.target.closest('.log-edit-btn');
+    if (editBtn) {
+      const key = editBtn.getAttribute('data-log-key');
+      const entries = state.tsRowLogs.get(key) || [];
+      const [user, dateStr] = key.split('|');
+      openLogEditModal(user, dateStr, entries);
+      return;
+    }
     const btn = ev.target.closest('.log-btn');
     if (!btn) return;
     const key = btn.getAttribute('data-log-key');
@@ -909,6 +988,23 @@ function wire() {
     const [user, dateStr] = key.split('|');
     openLogModal(`${user} — ${dateStr}`, entries);
   });
+
+  $('#log-edit-add').addEventListener('click', () => {
+    const tbody = $('#modal-log-edit tbody');
+    // Default new row: if last row was a stop, propose a start at last+0 min; else 08:00.
+    const rows = tbody.querySelectorAll('tr');
+    let nextKind = 'start';
+    let nextTime = '08:00';
+    if (rows.length > 0) {
+      const last = rows[rows.length - 1];
+      const lastKind = last.querySelector('.log-edit-kind').value;
+      const lastTime = last.querySelector('.log-edit-time').value || '08:00';
+      nextKind = lastKind === 'start' ? 'stop' : 'start';
+      nextTime = lastTime;
+    }
+    tbody.appendChild(makeEditRow(nextKind, nextTime));
+  });
+  $('#log-edit-save').addEventListener('click', saveLogEdit);
 
   $('#ts-year').addEventListener('change', (ev) => {
     state.tsYear = parseInt(ev.target.value, 10);

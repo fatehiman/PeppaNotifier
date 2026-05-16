@@ -364,6 +364,77 @@ body { display: flex; flex-direction: column; }
 .log-table tr.kind-start td.log-kind { color: #15803d; }
 .log-table tr.kind-stop td.log-kind  { color: #b45309; }
 
+/* Pencil icon (amir-only edit) — sits to the right of the (i) icon. */
+.log-edit-btn {
+  margin-left: 4px;
+  background: none;
+  border: 0;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+  color: #ea580c;
+  cursor: pointer;
+  vertical-align: middle;
+}
+.log-edit-btn:hover { color: #c2410c; }
+
+/* Edit modal — separate from the read-only log modal. */
+.modal-log-edit-card { width: min(340px, calc(100% - 32px)); }
+.log-edit-table { width: 100%; border-collapse: collapse; }
+.log-edit-table th, .log-edit-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 13px;
+  vertical-align: middle;
+}
+.log-edit-table th { background: #f3f4f6; font-weight: 600; text-align: left; }
+.log-edit-table tr:last-child td { border-bottom: 0; }
+.log-edit-table select,
+.log-edit-table input[type=time] {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+}
+.log-edit-table td:last-child { width: 36px; text-align: right; }
+.log-edit-del {
+  background: #fee2e2;
+  border: 1px solid #fca5a5;
+  color: #991b1b;
+  width: 26px;
+  height: 24px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.log-edit-del:hover { background: #fecaca; }
+.log-edit-empty {
+  padding: 16px 10px;
+  text-align: center;
+  color: #9ca3af;
+  font-size: 13px;
+}
+.log-edit-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid #f0f0f0;
+}
+.log-edit-add-btn {
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
+  color: #1e40af;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+.log-edit-add-btn:hover { background: #bfdbfe; }
+.log-edit-error { color: #991b1b; font-size: 12px; }
+
 /* Toast */
 .toast {
   position: fixed;

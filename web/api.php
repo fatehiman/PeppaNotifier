@@ -308,6 +308,77 @@ function action_ts_months(): void {
     send_json($months);
 }
 
+function action_ts_replace_day(): void {
+    $me = require_user();
+    if ($me !== 'amir') {
+        send_json(['error' => 'forbidden'], 403);
+        return;
+    }
+    $b = body_json();
+    $user = trim((string)($b['user'] ?? ''));
+    $date = trim((string)($b['date'] ?? ''));
+    $rawEntries = $b['entries'] ?? [];
+    if (!is_array($rawEntries)) $rawEntries = [];
+
+    if ($user === '' || !user_exists($user)) {
+        send_json(['error' => 'unknown user'], 400);
+        return;
+    }
+    if (!preg_match('/^(\d{4})-(\d{2})-(\d{2})$/', $date, $m)) {
+        send_json(['error' => 'bad date'], 400);
+        return;
+    }
+    $year  = (int)$m[1];
+    $month = (int)$m[2];
+    $day   = (int)$m[3];
+    if (!checkdate($month, $day, $year)) {
+        send_json(['error' => 'bad date'], 400);
+        return;
+    }
+
+    // Convert {kind, time} → {ts, kind} using TZ_VIEW. mktime() uses the
+    // default timezone set in lib.php (Asia/Tehran by default).
+    $newDay = [];
+    foreach ($rawEntries as $i => $e) {
+        $kind = is_array($e) ? (string)($e['kind'] ?? '') : '';
+        $time = is_array($e) ? (string)($e['time'] ?? '') : '';
+        if (!in_array($kind, ['start', 'stop'], true)) {
+            send_json(['error' => "entry $i: bad kind"], 400);
+            return;
+        }
+        if (!preg_match('/^(\d{1,2}):(\d{2})$/', $time, $tm)) {
+            send_json(['error' => "entry $i: bad time"], 400);
+            return;
+        }
+        $hh = (int)$tm[1]; $mm = (int)$tm[2];
+        if ($hh < 0 || $hh > 23 || $mm < 0 || $mm > 59) {
+            send_json(['error' => "entry $i: time out of range"], 400);
+            return;
+        }
+        $ts = mktime($hh, $mm, 0, $month, $day, $year);
+        if ($ts === false) {
+            send_json(['error' => "entry $i: mktime failed"], 400);
+            return;
+        }
+        $newDay[] = ['ts' => $ts, 'kind' => $kind];
+    }
+    // Sort the supplied entries by ts so the file stays ordered.
+    usort($newDay, fn($a, $b) => $a['ts'] <=> $b['ts']);
+
+    ts_replace_day_entries($year, $month, $user, $date, $newDay);
+
+    send_json([
+        'user'    => $user,
+        'date'    => $date,
+        'count'   => count($newDay),
+        'entries' => array_map(fn($e) => [
+            'ts'   => $e['ts'],
+            'kind' => $e['kind'],
+            'time' => date('H:i', $e['ts']),
+        ], $newDay),
+    ]);
+}
+
 function action_ts_month(): void {
     require_user();
     $year  = (int)($_GET['year']  ?? date('Y'));
@@ -357,6 +428,7 @@ try {
         case 'POST:ts_toggle':   action_ts_toggle(); break;
         case 'GET:ts_months':    action_ts_months(); break;
         case 'GET:ts_month':     action_ts_month(); break;
+        case 'POST:ts_replace_day': action_ts_replace_day(); break;
         case 'GET:state_get':    action_state_get(); break;
         case 'POST:state_toggle': action_state_toggle(); break;
         default:

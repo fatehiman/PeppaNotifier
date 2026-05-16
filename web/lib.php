@@ -318,6 +318,45 @@ function ts_append_user_month(int $year, int $month, string $user, array $entry)
     fclose($fp);
 }
 
+/**
+ * Replace every entry whose TZ_VIEW-local date equals $dateStr in $user's
+ * $year-$month file with the supplied $newDayEntries (each {ts, kind}).
+ * Other days in the same file are untouched. Used by the amir-only
+ * action_ts_replace_day editor.
+ */
+function ts_replace_day_entries(int $year, int $month, string $user, string $dateStr, array $newDayEntries): void {
+    ts_ensure_dir();
+    $path = ts_path($year, $month, $user);
+    $fp = fopen($path, 'c+b');
+    if ($fp === false) throw new RuntimeException("cannot open $path");
+    flock($fp, LOCK_EX);
+    $contents = stream_get_contents($fp);
+    $data = ($contents === '' || $contents === false) ? [] : json_decode($contents, true);
+    if (!is_array($data)) $data = [];
+
+    // Keep entries on OTHER days, drop the ones on $dateStr.
+    $kept = [];
+    foreach ($data as $e) {
+        $ts = (int)($e['ts'] ?? 0);
+        if ($ts > 0 && date('Y-m-d', $ts) !== $dateStr) {
+            $kept[] = ['ts' => $ts, 'kind' => (string)($e['kind'] ?? '')];
+        }
+    }
+    // Append the new day entries.
+    foreach ($newDayEntries as $e) {
+        $kept[] = ['ts' => (int)$e['ts'], 'kind' => (string)$e['kind']];
+    }
+    // Sort whole file by ts ascending.
+    usort($kept, fn($a, $b) => $a['ts'] <=> $b['ts']);
+
+    rewind($fp);
+    ftruncate($fp, 0);
+    fwrite($fp, json_encode($kept, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+    fflush($fp);
+    flock($fp, LOCK_UN);
+    fclose($fp);
+}
+
 /** Returns [['year'=>Y, 'month'=>M], ...] sorted desc, distinct across users. */
 function ts_list_months(): array {
     if (!is_dir(TS_DIR)) return [];

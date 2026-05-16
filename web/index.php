@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PeppaNotifier</title>
-  <link rel="stylesheet" href="assets/style.css?v=14">
+  <link rel="stylesheet" href="assets/style.css?v=15">
 </head>
 <body>
 
@@ -151,10 +151,33 @@
   </div>
 </div>
 
+<div id="modal-log-edit" class="modal hidden">
+  <div class="modal-card modal-log-edit-card">
+    <header class="modal-head">
+      <span id="log-edit-title"></span>
+      <button class="x" data-close>&times;</button>
+    </header>
+    <table class="log-edit-table">
+      <thead>
+        <tr><th>Kind</th><th>Time</th><th></th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <div class="log-edit-toolbar">
+      <button type="button" id="log-edit-add" class="log-edit-add-btn">+ Add entry</button>
+      <span id="log-edit-error" class="log-edit-error"></span>
+    </div>
+    <footer class="modal-actions">
+      <button type="button" id="log-edit-save" class="primary">Save</button>
+      <button type="button" data-close>Cancel</button>
+    </footer>
+  </div>
+</div>
+
 <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
 
 <audio id="notify-audio" src="assets/notify.mp3" preload="auto"></audio>
 
-<script src="assets/app.js?v=14"></script>
+<script src="assets/app.js?v=15"></script>
 </body>
 </html>
