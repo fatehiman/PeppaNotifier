@@ -98,6 +98,15 @@ function secsToHhmm(secs) {
   const m = totalMin % 60;
   return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
 }
+function secsToHhmmSigned(secs) {
+  // Hours never collapse to days (so 104:23 stays 104:23).
+  const sign = secs < 0 ? '-' : '';
+  const abs  = Math.abs(secs | 0);
+  const totalMin = Math.floor(abs / 60);
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return sign + String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
 function compute2DaysUntil() {
   const now = new Date();
   const twoDays = new Date(now.getTime() + 2 * 86400_000);
@@ -566,6 +575,7 @@ function makeEditRow(kind, time) {
 }
 
 function openLogEditModal(user, dateStr, entries) {
+  if (!isAdminUser()) return;  // defence-in-depth: even if DOM is tampered, modal won't open
   editCtx = { user, date: dateStr };
   $('#log-edit-title').textContent = `Edit — ${user} — ${dateStr}`;
   $('#log-edit-error').textContent = '';
@@ -578,6 +588,7 @@ function openLogEditModal(user, dateStr, entries) {
 }
 
 async function saveLogEdit() {
+  if (!isAdminUser()) return;  // defence-in-depth: server will 403 anyway, but no point even trying
   if (!editCtx) return;
   const tbody = $('#modal-log-edit tbody');
   const rows = [...tbody.querySelectorAll('tr')];
@@ -791,9 +802,15 @@ async function renderTimesheet() {
 
     const dayCell = `<td class="daycell">${d} ${weekdayShort}</td>`;
     const canEdit = isAdminUser();
+    // Weekday class: weekend (Sat/Sun) keeps its amber bg; weekdays alternate
+    // light-blue/light-green based on weekday number, so two rows on the same
+    // Monday share a colour even when they're different users.
+    const dayClass = isWeekend
+      ? 'weekend'
+      : (weekdayIdx % 2 === 1 ? 'weekday-a' : 'weekday-b');
     if (usersOnDay.length === 0) {
       const tr = document.createElement('tr');
-      tr.className = 'empty' + (isWeekend ? ' weekend' : '');
+      tr.className = 'empty ' + dayClass;
       tr.innerHTML = dayCell + `<td>—</td><td>—</td><td>—</td><td>—</td><td>—</td>`;
       tbody.appendChild(tr);
     } else {
@@ -803,7 +820,7 @@ async function renderTimesheet() {
         const logKey = `${user}|${dateStr}`;
         state.tsRowLogs.set(logKey, dayEntries);
         const tr = document.createElement('tr');
-        if (isWeekend) tr.classList.add('weekend');
+        tr.classList.add(dayClass);
         const logBtn =
           `<button type="button" class="log-btn" data-log-key="${escapeHtml(logKey)}" ` +
           `title="Show ${escapeHtml(user)}'s log for ${dateStr}" aria-label="Show log">ⓘ</button>`;
@@ -833,6 +850,13 @@ async function renderTimesheet() {
       tr.innerHTML = `<td>${escapeHtml(u)}</td><td>${secsToHhmm(userTotals[u])}</td>`;
       summaryTbody.appendChild(tr);
     }
+    // Hardcoded fatemeh − amir comparison row.
+    const fatemehSecs = userTotals['fatemeh'] || 0;
+    const amirSecs    = userTotals['amir']    || 0;
+    const diffTr = document.createElement('tr');
+    diffTr.className = 'summary-diff';
+    diffTr.innerHTML = `<td>fatemeh-amir</td><td>${secsToHhmmSigned(fatemehSecs - amirSecs)}</td>`;
+    summaryTbody.appendChild(diffTr);
   }
 }
 
@@ -974,6 +998,7 @@ function wire() {
   $('#ts-table').addEventListener('click', (ev) => {
     const editBtn = ev.target.closest('.log-edit-btn');
     if (editBtn) {
+      if (!isAdminUser()) return;  // ignore tampered/orphaned edit buttons
       const key = editBtn.getAttribute('data-log-key');
       const entries = state.tsRowLogs.get(key) || [];
       const [user, dateStr] = key.split('|');

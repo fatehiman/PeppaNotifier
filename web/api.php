@@ -246,11 +246,7 @@ function action_state_get(): void {
 }
 
 function action_state_toggle(): void {
-    $me = require_user();
-    if ($me !== 'amir') {
-        send_json(['error' => 'forbidden'], 403);
-        return;
-    }
+    require_admin();
     $new = state_get() === 1 ? 0 : 1;
     state_set($new);
     send_json(['on' => $new]);
@@ -309,11 +305,7 @@ function action_ts_months(): void {
 }
 
 function action_ts_replace_day(): void {
-    $me = require_user();
-    if ($me !== 'amir') {
-        send_json(['error' => 'forbidden'], 403);
-        return;
-    }
+    require_admin();
     $b = body_json();
     $user = trim((string)($b['user'] ?? ''));
     $date = trim((string)($b['date'] ?? ''));

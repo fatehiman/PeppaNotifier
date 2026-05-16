@@ -134,6 +134,20 @@ function require_user(): string {
     return $sessions[$tok]['user'];
 }
 
+/**
+ * Like require_user(), but additionally requires the caller to be `amir`.
+ * Used by the admin-only actions (state_toggle, ts_replace_day). Sends
+ * 401 if not authenticated, 403 if authenticated but not amir.
+ */
+function require_admin(): string {
+    $me = require_user();
+    if ($me !== 'amir') {
+        send_json(['error' => 'forbidden'], 403);
+        exit;
+    }
+    return $me;
+}
+
 function body_json(): array {
     $raw = file_get_contents('php://input');
     if ($raw === false || $raw === '') return [];

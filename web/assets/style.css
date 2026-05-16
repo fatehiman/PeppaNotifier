@@ -333,8 +333,15 @@ body { display: flex; flex-direction: column; }
 .ts-table tr:last-child td, .ts-summary tr:last-child td { border-bottom: 0; }
 .ts-table tr.weekend td { background: #fef3c7; }
 .ts-table tr.weekend td:first-child { color: #b45309; }
+/* Alternating weekday tints — keyed off the weekday itself so two rows
+   on the same Monday share a colour even though they're different users. */
+.ts-table tr.weekday-a td { background: #f7f7ff; }
+.ts-table tr.weekday-b td { background: #fafffa; }
 .ts-table tr.empty td { color: #9ca3af; }
 .ts-summary-title { margin: 0 0 8px; font-size: 14px; font-weight: 600; color: #374151; }
+
+/* Hardcoded "fatemeh − amir" comparison row at the bottom of the summary. */
+.ts-summary tr.summary-diff td { background: #fafffa; font-weight: 600; }
 
 .ts-table td.total { white-space: nowrap; }
 .log-btn {

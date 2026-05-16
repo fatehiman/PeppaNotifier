@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>PeppaNotifier</title>
-  <link rel="stylesheet" href="assets/style.css?v=15">
+  <link rel="stylesheet" href="assets/style.css?v=18">
 </head>
 <body>
 
@@ -178,6 +178,6 @@
 
 <audio id="notify-audio" src="assets/notify.mp3" preload="auto"></audio>
 
-<script src="assets/app.js?v=15"></script>
+<script src="assets/app.js?v=18"></script>
 </body>
 </html>
