@@ -330,6 +330,7 @@ function ts_append_user_month(int $year, int $month, string $user, array $entry)
     fflush($fp);
     flock($fp, LOCK_UN);
     fclose($fp);
+    backup_timesheet_file($year, $month, $user);
 }
 
 /**
@@ -369,6 +370,30 @@ function ts_replace_day_entries(int $year, int $month, string $user, string $dat
     fflush($fp);
     flock($fp, LOCK_UN);
     fclose($fp);
+    backup_timesheet_file($year, $month, $user);
+}
+
+/**
+ * Fire-and-forget POST of one timesheet file to BACKUP_URL.
+ * Spawns curl in the background ('&') and redirects all FDs so PHP returns
+ * immediately. No-op when BACKUP_URL or BACKUP_TOKEN is empty (= receiver
+ * or dev host). Linux-only; on Windows the '&' does nothing useful.
+ */
+function backup_timesheet_file(int $year, int $month, string $user): void {
+    if (!defined('BACKUP_URL') || BACKUP_URL === '') return;
+    if (!defined('BACKUP_TOKEN') || BACKUP_TOKEN === '') return;
+    $path = ts_path($year, $month, $user);
+    if (!file_exists($path)) return;
+    $filename = ts_filename($year, $month, $user);
+    $cmd = sprintf(
+        'curl -sS -o /dev/null -m 30 -H %s -H %s -H %s --data-binary @%s %s >/dev/null 2>&1 &',
+        escapeshellarg('X-Backup-Token: ' . BACKUP_TOKEN),
+        escapeshellarg('X-Backup-File: ' . $filename),
+        escapeshellarg('Content-Type: application/json'),
+        escapeshellarg($path),
+        escapeshellarg(BACKUP_URL)
+    );
+    @exec($cmd);
 }
 
 /** Returns [['year'=>Y, 'month'=>M], ...] sorted desc, distinct across users. */
